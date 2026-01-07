@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SkillsQuickstart.Config;
+using SkillsQuickstart.Models;
 using SkillsQuickstart.Services;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,9 +27,13 @@ var services = new ServiceCollection();
 
 // Bind configuration using IOptions pattern
 services.Configure<SkillsConfig>(configuration.GetSection(SkillsConfig.SectionName));
+services.Configure<AzureOpenAIConfig>(configuration.GetSection(AzureOpenAIConfig.SectionName));
 
 // Register skill loader service
 services.AddSingleton<ISkillLoader, SkillLoaderService>();
+
+// Register skill executor service
+services.AddSingleton<ISkillExecutor, AzureOpenAISkillExecutor>();
 
 var serviceProvider = services.BuildServiceProvider();
 var skillLoader = serviceProvider.GetRequiredService<ISkillLoader>();
@@ -77,29 +82,37 @@ foreach (var skill in skills)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LEVEL 2: Full Skill Load (Instructions + Resource Inventory)
-// Now we load the markdown body (instructions) for a specific skill
+// Now we load the markdown body (instructions) for the first available skill
 // ═══════════════════════════════════════════════════════════════════════════
+
+var firstSkill = skills.FirstOrDefault();
+
+if (firstSkill == null)
+{
+    Console.WriteLine("No skills available to load.\n");
+    return;
+}
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine(" LEVEL 2: Full Skill Load");
-Console.WriteLine(" Loading 'code-review' with instructions and resource details.");
+Console.WriteLine($" Loading '{firstSkill.Name}' ({firstSkill.Id}) with instructions and resource details.");
 Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
 
-var codeReview = await skillLoader.LoadSkillAsync("code-review");
+var loadedSkill = await skillLoader.LoadSkillAsync(firstSkill.Id);
 
-if (codeReview != null)
+if (loadedSkill != null)
 {
-    Console.WriteLine($"Loaded: {codeReview.Name}");
-    Console.WriteLine($"Version: {codeReview.Version ?? "not specified"}");
-    Console.WriteLine($"Is Fully Loaded: {codeReview.IsFullyLoaded}");
-    Console.WriteLine($"Instructions Length: {codeReview.Instructions?.Length ?? 0} characters\n");
+    Console.WriteLine($"Loaded: {loadedSkill.Name}");
+    Console.WriteLine($"Version: {loadedSkill.Version ?? "not specified"}");
+    Console.WriteLine($"Is Fully Loaded: {loadedSkill.IsFullyLoaded}");
+    Console.WriteLine($"Instructions Length: {loadedSkill.Instructions?.Length ?? 0} characters\n");
 
     // Show first 500 chars of instructions
-    if (codeReview.Instructions != null)
+    if (loadedSkill.Instructions != null)
     {
-        var preview = codeReview.Instructions.Length > 500
-            ? codeReview.Instructions[..500] + "..."
-            : codeReview.Instructions;
+        var preview = loadedSkill.Instructions.Length > 500
+            ? loadedSkill.Instructions[..500] + "..."
+            : loadedSkill.Instructions;
         Console.WriteLine("Instructions Preview:");
         Console.WriteLine("─────────────────────");
         Console.WriteLine(preview);
@@ -108,7 +121,7 @@ if (codeReview != null)
 
     // List discovered resources
     Console.WriteLine("Resource Inventory:");
-    foreach (var resource in codeReview.AllResources)
+    foreach (var resource in loadedSkill.AllResources)
     {
         var loadedStatus = resource.IsLoaded ? "[LOADED]" : "[pending]";
         Console.WriteLine($"  {resource.ResourceType,-10} {resource.RelativePath,-40} {loadedStatus}");
@@ -117,7 +130,7 @@ if (codeReview != null)
 }
 else
 {
-    Console.WriteLine("Skill 'code-review' not found.\n");
+    Console.WriteLine($"Skill '{firstSkill.Id}' not found.\n");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -130,7 +143,7 @@ Console.WriteLine(" LEVEL 3: Resource Loading (On-Demand)");
 Console.WriteLine(" Loading template content only when explicitly requested.");
 Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
 
-if (codeReview?.Templates.FirstOrDefault() is { } template)
+if (loadedSkill?.Templates.FirstOrDefault() is { } template)
 {
     Console.WriteLine($"Loading: {template.RelativePath}");
     Console.WriteLine($"File Size: {template.FileSize} bytes");
@@ -151,11 +164,11 @@ if (codeReview?.Templates.FirstOrDefault() is { } template)
 }
 else
 {
-    Console.WriteLine("No templates found for code-review skill.\n");
+    Console.WriteLine($"No templates found for {firstSkill.Name} skill.\n");
 }
 
 // Also load a reference file to show multiple resource types
-if (codeReview?.References.FirstOrDefault() is { } reference)
+if (loadedSkill?.References.FirstOrDefault() is { } reference)
 {
     Console.WriteLine($"Loading Reference: {reference.RelativePath}");
     var refContent = await skillLoader.LoadResourceContentAsync(reference);
@@ -182,22 +195,22 @@ Console.WriteLine(" BONUS: Simulated Agent Context");
 Console.WriteLine(" How this skill would appear in an agent's system prompt.");
 Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
 
-if (codeReview != null)
+if (loadedSkill != null)
 {
-    var templateList = codeReview.HasTemplates
-        ? string.Join("\n", codeReview.Templates.Select(t => $"  - {t.RelativePath}"))
+    var templateList = loadedSkill.HasTemplates
+        ? string.Join("\n", loadedSkill.Templates.Select(t => $"  - {t.RelativePath}"))
         : "  (none)";
 
-    var referenceList = codeReview.HasReferences
-        ? string.Join("\n", codeReview.References.Select(r => $"  - {r.RelativePath}"))
+    var referenceList = loadedSkill.HasReferences
+        ? string.Join("\n", loadedSkill.References.Select(r => $"  - {r.RelativePath}"))
         : "  (none)";
 
     var agentContext = $"""
         ┌──────────────────────────────────────────────────────────────┐
-        │ SKILL: {codeReview.Name,-52} │
+        │ SKILL: {loadedSkill.Name,-52} │
         └──────────────────────────────────────────────────────────────┘
 
-        {codeReview.Instructions}
+        {loadedSkill.Instructions}
 
         ══════════════════════════════════════════════════════════════
         Available Resources:
@@ -231,3 +244,73 @@ Console.WriteLine();
 Console.WriteLine("This pattern minimizes memory usage and load times by");
 Console.WriteLine("deferring expensive operations until actually needed.");
 Console.WriteLine();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BONUS: Execute Skill with Azure OpenAI
+// Demonstrates running the loaded skill with actual AI execution
+// ═══════════════════════════════════════════════════════════════════════════
+
+var skillExecutor = serviceProvider.GetRequiredService<ISkillExecutor>();
+
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
+Console.WriteLine(" BONUS: Execute Skill with Azure OpenAI");
+Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+
+if (skillExecutor.IsConfigured)
+{
+    var azureConfig = serviceProvider.GetRequiredService<IOptions<AzureOpenAIConfig>>().Value;
+    Console.WriteLine($"Azure OpenAI Configuration:");
+    Console.WriteLine($"  Endpoint:        {azureConfig.Endpoint}");
+    Console.WriteLine($"  Deployment:      {azureConfig.DeploymentName}");
+    Console.WriteLine($"  Model:           {azureConfig.ModelName}");
+    Console.WriteLine($"  Max Tokens:      {azureConfig.MaxTokens}");
+    Console.WriteLine($"  Temperature:     {azureConfig.Temperature}");
+    Console.WriteLine();
+
+    if (loadedSkill != null)
+    {
+        Console.WriteLine($"Executing '{loadedSkill.Name}' skill...");
+        Console.WriteLine($"(In a real application, you would provide user input here)");
+        Console.WriteLine();
+
+        // Example user input - in a real app this would come from the user
+        var exampleInput = "Hello! Please help me with a task.";
+        Console.WriteLine($"Example Input: {exampleInput}");
+        Console.WriteLine();
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine("Note: Azure OpenAI execution is ready. To execute the skill,");
+        Console.WriteLine("provide actual user input and uncomment the execution below.");
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine();
+
+        // Uncomment to actually execute the skill with Azure OpenAI:
+        /*
+        try
+        {
+            var response = await skillExecutor.ExecuteAsync(loadedSkill, exampleInput);
+            Console.WriteLine("\nAI Response:");
+            Console.WriteLine("─────────────────────");
+            Console.WriteLine(response);
+            Console.WriteLine("─────────────────────\n");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\nError: {ex.Message}\n");
+        }
+        */
+    }
+}
+else
+{
+    Console.WriteLine("Azure OpenAI is not configured.");
+    Console.WriteLine();
+    Console.WriteLine("To enable skill execution, update appsettings.json:");
+    Console.WriteLine("  {");
+    Console.WriteLine("    \"AzureOpenAI\": {");
+    Console.WriteLine("      \"Endpoint\": \"https://your-resource.openai.azure.com/\",");
+    Console.WriteLine("      \"ApiKey\": \"your-api-key\",");
+    Console.WriteLine("      \"DeploymentName\": \"your-deployment-name\"");
+    Console.WriteLine("    }");
+    Console.WriteLine("  }");
+    Console.WriteLine();
+}
