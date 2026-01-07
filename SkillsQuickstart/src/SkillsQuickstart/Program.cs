@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.UserSecrets;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SkillsQuickstart.Config;
@@ -21,6 +22,7 @@ Console.WriteLine("╚═══════════════════�
 var configuration = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false)
+    .AddUserSecrets<Program>()  // Load user secrets for local development
     .Build();
 
 var services = new ServiceCollection();
@@ -312,5 +314,127 @@ else
     Console.WriteLine("      \"DeploymentName\": \"your-deployment-name\"");
     Console.WriteLine("    }");
     Console.WriteLine("  }");
+    Console.WriteLine();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADVANCED DEMO: EY Executive Deck Generator with Tools
+// Demonstrates skill execution with function calling and PPTX generation
+// ═══════════════════════════════════════════════════════════════════════════
+
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
+Console.WriteLine(" ADVANCED: EY Executive Deck Generator");
+Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+
+// Try to find the EY Executive Deck skill
+var eySkill = skills.FirstOrDefault(s => s.Id == "ey-executive-deck");
+
+if (eySkill != null)
+{
+    Console.WriteLine($"Found EY Executive Deck Generator skill!");
+    Console.WriteLine($"  Resources: {eySkill.TotalResourceCount} files");
+    Console.WriteLine($"    References: {eySkill.References.Count}");
+    Console.WriteLine($"    Assets: {eySkill.Assets.Count}");
+    Console.WriteLine();
+
+    // Load the full skill
+    var fullEySkill = await skillLoader.LoadSkillAsync("ey-executive-deck");
+    if (fullEySkill != null)
+    {
+        Console.WriteLine("Loaded skill instructions:");
+        Console.WriteLine($"  Length: {fullEySkill.Instructions?.Length ?? 0} characters");
+        Console.WriteLine();
+
+        Console.WriteLine("Available Resources:");
+        foreach (var resource in fullEySkill.AllResources)
+        {
+            Console.WriteLine($"  [{resource.ResourceType}] {resource.RelativePath}");
+        }
+        Console.WriteLine();
+
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine("Example: Generating an Executive Deck");
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine();
+
+        // Example 1: Recommend narrative framework
+        Console.WriteLine("1. Framework Recommendation:");
+        Console.WriteLine("   Question: Should I use SCR or Past-Present-Future?");
+        Console.WriteLine();
+
+        var framework = PptxGeneratorTools.RecommendFramework(
+            requiresDecision: true,
+            hasHighStakes: true,
+            anticipatesResistance: true
+        );
+
+        Console.WriteLine(framework);
+        Console.WriteLine();
+
+        // Example 2: Generate assertive headline
+        Console.WriteLine("2. Assertive Headline Generation:");
+        Console.WriteLine("   Transforming weak labels into compelling headlines");
+        Console.WriteLine();
+
+        var headlines = new[]
+        {
+            ("Market Overview", "Market dynamics present $50M opportunity", "through digital transformation"),
+            ("Current State", "Legacy operations limit growth and increase risk", "by 40%"),
+            ("Recommendations", "Modernize on unified cloud platform", "to reduce costs by 30%")
+        };
+
+        foreach (var (label, insight, metric) in headlines)
+        {
+            var headline = PptxGeneratorTools.GenerateAssertiveHeadline(label, insight, metric);
+            Console.WriteLine($"   Weak: {label}");
+            Console.WriteLine($"   Assertive: {headline}");
+            Console.WriteLine();
+        }
+
+        // Example 3: Generate slide structure
+        Console.WriteLine("3. Slide Structure Generation:");
+        Console.WriteLine("   Creating outline for SCR framework deck");
+        Console.WriteLine();
+
+        var structure = PptxGeneratorTools.GenerateSlideStructure(
+            framework: "SCR",
+            context: "Azure cloud migration recommendation",
+            slideCount: 5
+        );
+
+        Console.WriteLine(structure);
+
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine("To Execute with Azure OpenAI:");
+        Console.WriteLine("─".PadRight(60, '─'));
+        Console.WriteLine();
+        Console.WriteLine("With proper Azure OpenAI credentials configured, the AI can:");
+        Console.WriteLine("1. Load brand guidelines using LoadResource tool");
+        Console.WriteLine("2. Recommend appropriate framework using RecommendFramework");
+        Console.WriteLine("3. Generate assertive headlines for each slide");
+        Console.WriteLine("4. Create structured slide outlines");
+        Console.WriteLine("5. Generate final PowerPoint .pptx file");
+        Console.WriteLine();
+        Console.WriteLine("Example user prompt:");
+        Console.WriteLine("  'Create a 5-slide deck recommending Azure migration for CIO approval'");
+        Console.WriteLine();
+        Console.WriteLine("The AI would:");
+        Console.WriteLine("  - Load assets/brand/ey-brand.md for guidelines");
+        Console.WriteLine("  - Load references/narrative-framework.md for methodology");
+        Console.WriteLine("  - Use RecommendFramework (returns SCR for this context)");
+        Console.WriteLine("  - Use GenerateAssertiveHeadline for each slide");
+        Console.WriteLine("  - Use GenerateSlideStructure for outline");
+        Console.WriteLine("  - Use CreatePresentation to generate .pptx file");
+        Console.WriteLine();
+    }
+}
+else
+{
+    Console.WriteLine("EY Executive Deck skill not found.");
+    Console.WriteLine("Available skills:");
+    foreach (var skill in skills)
+    {
+        Console.WriteLine($"  - {skill.Name} ({skill.Id})");
+    }
     Console.WriteLine();
 }

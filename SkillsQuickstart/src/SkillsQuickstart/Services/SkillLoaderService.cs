@@ -416,7 +416,13 @@ public partial class SkillLoaderService : ISkillLoader
             return;
         }
 
-        var files = Directory.GetFiles(folderPath, pattern, SearchOption.TopDirectoryOnly);
+        // Use AllDirectories for assets to support nested folder structures (e.g., assets/brand/, assets/templates/)
+        // Use TopDirectoryOnly for other resource types to avoid unintended discovery
+        var searchOption = resourceType == SkillResourceType.Asset
+            ? SearchOption.AllDirectories
+            : SearchOption.TopDirectoryOnly;
+
+        var files = Directory.GetFiles(folderPath, pattern, searchOption);
 
         foreach (var file in files)
         {
