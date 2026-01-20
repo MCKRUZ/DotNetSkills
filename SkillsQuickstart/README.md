@@ -214,6 +214,80 @@ User Input
 └─────────────────────────────────────────────┘
 ```
 
+### How Tool Selection Works
+
+A key architectural principle: **the LLM decides which tools to use, not the orchestrator**.
+
+The orchestrator has zero hardcoded logic about when to call specific tools. Instead, it provides the LLM with:
+
+1. **Skill instructions** (system prompt from SKILL.md)
+2. **Available tools** (function definitions with descriptions)
+3. **User input** (the user's request)
+
+The LLM reasons about all three and decides whether to call tools and which ones.
+
+```
+┌─────────────────────────────────────────────────────┐
+│ What the LLM Receives                               │
+├─────────────────────────────────────────────────────┤
+│ System Prompt: (from SKILL.md)                      │
+│   "You are a project analyzer. Use these tools:     │
+│    - analyze_directory: shows file structure        │
+│    - count_lines: counts lines of code              │
+│    - find_patterns: finds TODOs/FIXMEs"             │
+│                                                     │
+│ Tools: [                                            │
+│   { name: "analyze_directory", description: "...",  │
+│     parameters: { path: string, maxDepth: int } },  │
+│   { name: "count_lines", ... },                     │
+│   ...                                               │
+│ ]                                                   │
+│                                                     │
+│ User Message: "Analyze the src folder"              │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+              LLM reasons and decides:
+      "I should call analyze_directory first..."
+```
+
+**Skills guide tool selection through their instructions:**
+
+| Guidance Level | Example | Result |
+|----------------|---------|--------|
+| **No mention** | Code Explainer skill has no tool instructions | LLM uses pure reasoning, no tools |
+| **Suggested** | "You can use analyze_directory to see structure" | LLM may or may not use tools |
+| **Required** | "ALWAYS call tools. Do not make assumptions." | LLM will use tools for every request |
+
+**The agentic loop in SkillExecutor.cs:**
+
+```csharp
+while (turnCount < maxTurns)
+{
+    // Call Azure OpenAI - LLM decides what to do
+    var result = await _openAIService.GetCompletionAsync(messages, tools);
+
+    if (result.HasToolCalls)
+    {
+        // LLM requested tools - orchestrator just executes them
+        foreach (var toolCall in result.ToolCalls)
+        {
+            var toolResult = await _mcpClientService.ExecuteToolAsync(
+                toolCall.FunctionName,
+                toolCall.FunctionArguments.ToString());
+
+            messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+        }
+        continue; // Let LLM see results and decide next action
+    }
+
+    // No tool calls - LLM is done, return response
+    return new SkillExecutionResult { Response = result.TextResponse };
+}
+```
+
+The orchestrator is "dumb plumbing" - it executes whatever the LLM requests and feeds results back. The intelligence is entirely in the LLM's reasoning.
+
 ### MCP Client Service
 
 The `McpClientService` acts as an MCP client that:
