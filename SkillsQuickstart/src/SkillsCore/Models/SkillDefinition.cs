@@ -1,4 +1,4 @@
-namespace SkillsQuickstart.Models;
+namespace SkillsCore.Models;
 
 /// <summary>
 /// Represents a skill loaded from a SKILL.md file.

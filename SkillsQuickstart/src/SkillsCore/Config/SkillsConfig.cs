@@ -1,4 +1,4 @@
-namespace SkillsQuickstart.Config;
+namespace SkillsCore.Config;
 
 /// <summary>
 /// Configuration for the skills loader system.

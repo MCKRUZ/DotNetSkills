@@ -1,6 +1,6 @@
-using SkillsQuickstart.Models;
+using SkillsCore.Models;
 
-namespace SkillsQuickstart.Services;
+namespace SkillsCore.Services;
 
 /// <summary>
 /// Service for discovering and loading skills following the progressive disclosure pattern.

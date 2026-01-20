@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
-using SkillsQuickstart.Config;
-using SkillsQuickstart.Models;
+using SkillsCore.Config;
+using SkillsCore.Models;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace SkillsQuickstart.Services;
+namespace SkillsCore.Services;
 
 /// <summary>
 /// Implementation of skill loading with progressive disclosure and caching.

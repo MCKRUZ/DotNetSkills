@@ -3,7 +3,10 @@
     "allow": [
       "Bash(dotnet restore:*)",
       "Bash(dotnet build:*)",
-      "Bash(dotnet run:*)"
+      "Bash(dotnet run:*)",
+      "Bash(cd:*)",
+      "Bash(tree:*)",
+      "Bash(dotnet add:*)"
     ]
   }
 }

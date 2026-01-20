@@ -1,4 +1,4 @@
-namespace SkillsQuickstart.Models;
+namespace SkillsCore.Models;
 
 /// <summary>
 /// Represents a file bundled with a skill.

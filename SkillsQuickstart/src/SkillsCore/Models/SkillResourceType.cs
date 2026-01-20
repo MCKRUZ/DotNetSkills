@@ -1,4 +1,4 @@
-namespace SkillsQuickstart.Models;
+namespace SkillsCore.Models;
 
 /// <summary>
 /// Categorizes skill resources by their intended purpose.
