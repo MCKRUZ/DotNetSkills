@@ -1,277 +1,335 @@
-# Agent Skills Loader Quickstart
+# Skills Executor
 
-A .NET 8 implementation of Anthropic's Agent Skills pattern, demonstrating how to structure, discover, and load skills for AI agents.
+A .NET orchestrator for executing Anthropic-style Skills with Azure OpenAI and MCP (Model Context Protocol) tool support.
 
-## What This Demonstrates
+## Overview
 
-This quickstart shows how to implement the **Agent Skills pattern** used by Claude Code and similar AI agent systems. The key concepts are:
+This project demonstrates how to build an AI agent orchestration system that:
 
-1. **Skill Structure** - Matching Claude Code's conventions exactly
-2. **YAML Frontmatter** - Parsing metadata from SKILL.md files
-3. **Progressive Disclosure** - Loading only what's needed, when it's needed
-4. **Resource Management** - Bundling templates, references, scripts, and assets
-
-## Folder Structure
-
-Skills follow Claude Code's standard folder conventions:
+1. **Loads Skills** - Parses `SKILL.md` files (Anthropic's skill format) with YAML frontmatter
+2. **Connects to MCP Servers** - Acts as an MCP client to discover and execute tools
+3. **Orchestrates LLM Calls** - Uses Azure OpenAI with function calling in an agentic loop
+4. **Routes Tool Calls** - Bridges between Azure OpenAI tool calls and MCP server execution
 
 ```
-skills/
-└── my-skill/
-    ├── SKILL.md              # Required: frontmatter + instructions
-    ├── templates/            # Optional: output templates
-    │   └── *.template.*
-    ├── references/           # Optional: reference documentation
-    │   └── *.md
-    ├── scripts/              # Optional: executable scripts
-    │   └── *.*
-    └── assets/               # Optional: binary files, images, etc.
-        └── *.*
-```
-
-### SKILL.md Format
-
-Each skill requires a `SKILL.md` file with YAML frontmatter:
-
-```yaml
----
-name: My Skill Name
-description: Brief description of what this skill does and when to use it.
-version: "1.0.0"
-author: Your Name
-category: development
-tags:
-  - tag1
-  - tag2
----
-# Skill Instructions
-
-Detailed markdown instructions for the AI agent...
-```
-
-## Progressive Disclosure
-
-The loader implements three levels of progressive disclosure to minimize memory usage and load times:
-
-| Level | Method | What's Loaded | Use Case |
-|-------|--------|---------------|----------|
-| 1 | `DiscoverSkillsAsync()` | Metadata only (name, description, tags, resource counts) | Displaying skill catalogs/lists |
-| 2 | `LoadSkillAsync()` | Full skill with instructions + resource inventory | Preparing to use a skill |
-| 3 | `LoadResourceContentAsync()` | Actual file content | Using a specific template/reference |
-
-```csharp
-// Level 1: Quick discovery for listing
-var skills = await skillLoader.DiscoverSkillsAsync();
-// skills[0].Instructions == null (not loaded yet)
-
-// Level 2: Full load when skill is selected
-var skill = await skillLoader.LoadSkillAsync("code-review");
-// skill.Instructions contains markdown body
-// skill.Templates has file metadata (but not content)
-
-// Level 3: Load resource content on demand
-var template = skill.Templates.First();
-var content = await skillLoader.LoadResourceContentAsync(template);
-// Now template.Content and template.IsLoaded are populated
-```
-
-## Getting Started
-
-### Prerequisites
-
-- .NET 8 SDK
-- Visual Studio 2022, VS Code, or Rider
-
-### Running the Demo
-
-```bash
-cd SkillsQuickstart
-dotnet restore
-dotnet run --project src/SkillsQuickstart
-```
-
-### Expected Output
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║       Agent Skills Loader - Progressive Disclosure Demo      ║
-╚══════════════════════════════════════════════════════════════╝
-
-═══════════════════════════════════════════════════════════════
- LEVEL 1: Discovery (Metadata Only)
-═══════════════════════════════════════════════════════════════
-
-┌─ Code Review Assistant (code-review)
-│  Performs structured code reviews...
-│  Tags: [development, quality, security, code-review]
-│  Resources: 2 files
-│  Instructions Loaded: False
-└─ Fully Loaded: False
-
-...
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Skills Executor                               │
+│                     (.NET Console Application)                       │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
+│   │ Skill Loader │    │ Azure OpenAI │    │   MCP Client Service │  │
+│   │              │    │   Service    │    │                      │  │
+│   │ • Discovers  │    │              │    │ • Connects to MCP    │  │
+│   │   SKILL.md   │    │ • Chat API   │    │   servers            │  │
+│   │ • Parses     │    │ • Function   │    │ • Routes tool calls  │  │
+│   │   YAML       │    │   Calling    │    │ • Returns results    │  │
+│   └──────────────┘    └──────────────┘    └──────────────────────┘  │
+│                                                    │                 │
+└────────────────────────────────────────────────────│─────────────────┘
+                                                     │
+                           ┌─────────────────────────┴─────────────────────────┐
+                           │                                                   │
+                           ▼                                                   ▼
+              ┌────────────────────────┐                         ┌─────────────────────────┐
+              │   Skills MCP Server    │                         │  External MCP Servers   │
+              │   (Custom .NET)        │                         │  (e.g., GitHub)         │
+              │                        │                         │                         │
+              │ • analyze_directory    │                         │ • search_repositories   │
+              │ • count_lines          │                         │ • list_issues           │
+              │ • find_patterns        │                         │ • get_file_contents     │
+              └────────────────────────┘                         └─────────────────────────┘
 ```
 
 ## Project Structure
 
 ```
 SkillsQuickstart/
-├── SkillsQuickstart.sln
-├── README.md
-└── src/
-    └── SkillsQuickstart/
-        ├── SkillsQuickstart.csproj
-        ├── Program.cs                    # Demo entry point
-        ├── appsettings.json              # Configuration
-        ├── Config/
-        │   └── SkillsConfig.cs           # IOptions configuration
-        ├── Models/
-        │   ├── SkillDefinition.cs        # Skill representation
-        │   ├── SkillResource.cs          # Resource representation
-        │   └── SkillResourceType.cs      # Resource categories
-        ├── Services/
-        │   ├── ISkillLoader.cs           # Service interface
-        │   └── SkillLoaderService.cs     # Implementation
-        └── skills/                        # Example skills
-            ├── code-review/
-            ├── api-client/
-            └── documentation/
+├── src/
+│   ├── SkillsCore/              # Shared library
+│   │   ├── Config/              # Configuration models
+│   │   ├── Models/              # SkillDefinition, SkillResource
+│   │   └── Services/            # ISkillLoader, SkillLoaderService
+│   │
+│   ├── SkillsQuickstart/        # Main orchestrator application
+│   │   ├── Config/              # AzureOpenAIConfig, McpServerConfig
+│   │   ├── Services/            # AzureOpenAI, MCP Client, Skill Executor
+│   │   ├── skills/              # SKILL.md files
+│   │   │   ├── code-explainer/  # Skill 1: No tools (pure LLM)
+│   │   │   ├── project-analyzer/# Skill 2: Custom MCP tools
+│   │   │   └── github-assistant/# Skill 3: External MCP server
+│   │   ├── Program.cs           # Entry point with Spectre.Console UI
+│   │   └── appsettings.json     # Configuration
+│   │
+│   └── SkillsMcpServer/         # Custom MCP server
+│       ├── Tools/               # Tool implementations
+│       │   └── ProjectAnalysisTools.cs
+│       └── Program.cs           # MCP server entry point
+│
+└── README.md
 ```
 
-## How to Create Skills
+## Skills
 
-### 1. Create the Skill Folder
+Skills are markdown files with YAML frontmatter that define the system prompt for the LLM:
 
-```bash
-mkdir skills/my-new-skill
-```
+### 1. Code Explainer (No Tools)
+Pure LLM reasoning - explains code without any tool usage.
 
-### 2. Create SKILL.md
-
-```markdown
+```yaml
 ---
-name: My New Skill
-description: What this skill does and when to use it.
-tags:
-  - relevant-tag
+name: Code Explainer
+description: Explains code in plain English...
+tags: [code, explanation, no-tools]
 ---
-# My New Skill
-
-## Instructions
-
-Tell the AI agent how to use this skill...
+# Instructions...
 ```
 
-### 3. Add Resources (Optional)
+### 2. Project Analyzer (Custom MCP Tools)
+Uses custom tools from our `SkillsMcpServer`:
 
-```bash
-# Add output templates
-mkdir skills/my-new-skill/templates
-echo "# Report..." > skills/my-new-skill/templates/report.template.md
+| Tool | Description |
+|------|-------------|
+| `analyze_directory` | Returns directory tree with file sizes |
+| `count_lines` | Counts lines of code by file type |
+| `find_patterns` | Finds TODO, FIXME, HACK patterns |
 
-# Add reference documentation
-mkdir skills/my-new-skill/references
-echo "# Guidelines..." > skills/my-new-skill/references/guidelines.md
-```
+### 3. GitHub Assistant (External MCP Server)
+Uses the official `@modelcontextprotocol/server-github` MCP server:
 
-### 4. Discovery is Automatic
+| Tool | Description |
+|------|-------------|
+| `search_repositories` | Search GitHub repos |
+| `list_issues` | List issues in a repo |
+| `get_file_contents` | Get file contents |
+| `search_code` | Search code across GitHub |
 
-The loader automatically discovers new skills on the next `DiscoverSkillsAsync()` call.
+## Prerequisites
+
+- .NET 8.0 SDK
+- Node.js (for external MCP servers like GitHub)
+- Azure OpenAI resource with a GPT-4 deployment
 
 ## Configuration
 
-Configuration is managed via `appsettings.json`:
+### 1. Set up User Secrets
+
+```bash
+cd src/SkillsQuickstart
+
+# Azure OpenAI credentials
+dotnet user-secrets set "AzureOpenAI:Endpoint" "https://your-resource.openai.azure.com/"
+dotnet user-secrets set "AzureOpenAI:ApiKey" "your-api-key"
+
+# GitHub Personal Access Token (for github-assistant skill)
+dotnet user-secrets set "GITHUB_PERSONAL_ACCESS_TOKEN" "ghp_your_token_here"
+```
+
+### 2. Configure MCP Servers
+
+Edit `appsettings.json` to configure MCP servers:
 
 ```json
 {
-  "Skills": {
-    "BasePath": "skills",
-    "SkillFileName": "SKILL.md",
-    "TemplatesDirectory": "templates",
-    "ReferencesDirectory": "references",
-    "ScriptsDirectory": "scripts",
-    "AssetsDirectory": "assets",
-    "CacheDurationMinutes": 5,
-    "EagerLoadResources": false
+  "McpServers": {
+    "Servers": [
+      {
+        "Name": "skills-mcp-server",
+        "Command": "dotnet",
+        "Arguments": ["path/to/SkillsMcpServer.dll"],
+        "Environment": {},
+        "Enabled": true
+      },
+      {
+        "Name": "github-mcp-server",
+        "Command": "npx",
+        "Arguments": ["-y", "@modelcontextprotocol/server-github"],
+        "Environment": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+        },
+        "Enabled": true
+      }
+    ]
   }
 }
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `BasePath` | `skills` | Root directory for skill discovery |
-| `SkillFileName` | `SKILL.md` | Name of skill definition file |
-| `CacheDurationMinutes` | `5` | How long to cache discovered skills |
-| `EagerLoadResources` | `false` | If true, loads all resource content during skill load |
+> **Note**: Empty environment values are resolved from User Secrets at runtime.
 
-## Example Skills Included
+## Running the Application
 
-### code-review
-Demonstrates: Templates + References
+### Build the MCP Server first
 
-Performs structured code reviews with security, quality, performance, and maintainability analysis.
-
-### api-client
-Demonstrates: Templates + Scripts + Assets
-
-Generates strongly-typed API clients from OpenAPI specifications.
-
-### documentation
-Demonstrates: Templates only
-
-Creates comprehensive project documentation including READMEs and guides.
-
-## Key Implementation Details
-
-### Frontmatter Parsing
-
-The service uses regex to separate YAML frontmatter from markdown:
-
-```csharp
-[GeneratedRegex(@"^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)")]
-private static partial Regex FrontmatterRegex();
+```bash
+cd src/SkillsMcpServer
+dotnet build
 ```
 
-### Two-Level Caching
+### Run the Orchestrator
 
-```csharp
-// Metadata cache: Only frontmatter loaded
-private readonly ConcurrentDictionary<string, SkillDefinition> _metadataCache;
-
-// Full cache: Frontmatter + instructions loaded
-private readonly ConcurrentDictionary<string, SkillDefinition> _fullCache;
+```bash
+cd src/SkillsQuickstart
+dotnet run
 ```
 
-### Resource Discovery (Not Loading)
+The application will:
+1. Display available skills
+2. Connect to configured MCP servers
+3. Show available tools
+4. Let you select a skill
+5. Accept your input
+6. Execute the agentic loop (LLM -> Tools -> LLM -> ...)
+7. Display results
 
-Resources are discovered (paths captured) without reading file content:
+## How It Works
+
+### Orchestration Flow
+
+```
+User Input
+    │
+    ▼
+┌─────────────────────────────────────────────┐
+│ Skill Executor                              │
+│                                             │
+│  1. Build system prompt from SKILL.md       │
+│  2. Initialize conversation                 │
+│  3. Get available tools from MCP servers    │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ Agentic Loop (max 10 turns)         │   │
+│  │                                     │   │
+│  │  Call Azure OpenAI ──────────────┐  │   │
+│  │       │                          │  │   │
+│  │       ▼                          │  │   │
+│  │  Tool calls?                     │  │   │
+│  │    │     │                       │  │   │
+│  │   Yes    No ─────► Return        │  │   │
+│  │    │            Response         │  │   │
+│  │    ▼                             │  │   │
+│  │  Execute via MCP ────────────────┘  │   │
+│  │  Add results to conversation        │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+### MCP Client Service
+
+The `McpClientService` acts as an MCP client that:
+
+1. **Initializes** - Spawns MCP server processes via stdio transport
+2. **Discovers** - Lists available tools from each server
+3. **Routes** - Maps tool names to their source server
+4. **Executes** - Calls tools and returns results
 
 ```csharp
-private void DiscoverResources(SkillDefinition skill)
+// Example: Execute a tool
+var result = await mcpClientService.ExecuteToolAsync(
+    "analyze_directory",
+    """{"path": "C:/projects/myapp", "maxDepth": 3}""");
+```
+
+### Skill Definition Format
+
+Skills use Anthropic's `SKILL.md` format:
+
+```markdown
+---
+name: My Skill
+description: What this skill does and when to use it.
+version: 1.0.0
+author: Your Name
+category: development
+tags:
+  - tag1
+  - tag2
+---
+
+# Skill Instructions
+
+Detailed instructions that become the system prompt...
+
+## Available Tools
+- tool_1: Description
+- tool_2: Description
+
+## How to Help Users
+...
+```
+
+## Creating New Skills
+
+1. Create a folder under `skills/` with your skill name (e.g., `my-skill/`)
+2. Add a `SKILL.md` file with YAML frontmatter
+3. Write clear instructions for the LLM
+4. Document which tools (if any) the skill should use
+
+## Creating Custom MCP Tools
+
+Add tools to `SkillsMcpServer/Tools/`:
+
+```csharp
+using ModelContextProtocol.Server;
+
+[McpServerToolType]
+public static class MyTools
 {
-    DiscoverResourcesInFolder(skill, skill.Templates,
-        "templates", "*.template.*", SkillResourceType.Template);
-    // ... other folders
+    [McpServerTool(Name = "my_tool")]
+    [Description("What this tool does")]
+    public static string MyTool(
+        [Description("Parameter description")] string param1)
+    {
+        // Implementation
+        return "Result";
+    }
 }
 ```
 
-## Extending for Production
+## Key Concepts
 
-This quickstart demonstrates the core pattern. For production use, consider:
+### Skills vs Tools
 
-- **Dependency Management**: Skills that depend on other skills
-- **Workflow Orchestration**: Multi-skill workflows with phases
-- **AI Provider Integration**: Injecting skills into agent prompts
-- **Version Management**: Supporting multiple skill versions
-- **Hot Reloading**: Watching for skill file changes
-- **Validation**: Schema validation for skill frontmatter
+| Concept | Description |
+|---------|-------------|
+| **Skill** | A `SKILL.md` file that defines the system prompt and instructions for the LLM |
+| **Tool** | A function exposed via MCP that the LLM can call to perform actions |
+
+### MCP Architecture
+
+- **MCP Server**: Exposes tools via the Model Context Protocol
+- **MCP Client**: Connects to servers, discovers tools, executes calls
+- **Stdio Transport**: Communication via stdin/stdout (spawned processes)
 
 ## Dependencies
 
-- `YamlDotNet` - YAML frontmatter parsing
-- `Microsoft.Extensions.Configuration` - Configuration management
-- `Microsoft.Extensions.DependencyInjection` - Dependency injection
-- `Microsoft.Extensions.Options` - IOptions pattern support
+| Package | Purpose |
+|---------|---------|
+| `Azure.AI.OpenAI` | Azure OpenAI client |
+| `ModelContextProtocol` | MCP client/server SDK |
+| `Spectre.Console` | Rich terminal UI |
+| `YamlDotNet` | YAML frontmatter parsing |
+
+## Troubleshooting
+
+### MCP Server won't connect
+
+1. Ensure the MCP server is built: `dotnet build` in `SkillsMcpServer/`
+2. Check the path in `appsettings.json` is absolute
+3. Verify Node.js is installed (for external servers like GitHub)
+
+### Azure OpenAI errors
+
+1. Verify credentials in User Secrets
+2. Check the deployment name matches your Azure resource
+3. Ensure your API key has access to the deployment
+
+### GitHub tools not working
+
+1. Verify `GITHUB_PERSONAL_ACCESS_TOKEN` is set in User Secrets
+2. Ensure the token has appropriate scopes (repo, read:org)
+3. Check rate limits if making many requests
 
 ## License
 
-This project is provided as a reference implementation for educational purposes.
+MIT

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -14,13 +15,15 @@ namespace SkillsQuickstart.Services;
 public class McpClientService : IMcpClientService
 {
     private readonly McpServersConfig _config;
+    private readonly IConfiguration _configuration;
     private readonly Dictionary<string, IMcpClient> _clients = new();
     private readonly Dictionary<string, (string ServerName, McpClientTool Tool)> _toolRegistry = new();
     private bool _initialized;
 
-    public McpClientService(IOptions<McpServersConfig> config)
+    public McpClientService(IOptions<McpServersConfig> config, IConfiguration configuration)
     {
         _config = config.Value;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -58,9 +61,21 @@ public class McpClientService : IMcpClientService
                 // Add environment variables if specified
                 if (serverConfig.Environment.Count > 0)
                 {
-                    transportConfig.EnvironmentVariables = new Dictionary<string, string?>(
-                        serverConfig.Environment.Select(kvp =>
-                            new KeyValuePair<string, string?>(kvp.Key, kvp.Value)));
+                    var envVars = new Dictionary<string, string?>();
+                    foreach (var kvp in serverConfig.Environment)
+                    {
+                        var value = kvp.Value;
+
+                        // If the value is empty, try to get it from configuration (user secrets)
+                        if (string.IsNullOrEmpty(value))
+                        {
+                            // Try root-level key first (e.g., "GITHUB_PERSONAL_ACCESS_TOKEN")
+                            value = _configuration[kvp.Key];
+                        }
+
+                        envVars[kvp.Key] = value;
+                    }
+                    transportConfig.EnvironmentVariables = envVars;
                 }
 
                 // Create and connect the client

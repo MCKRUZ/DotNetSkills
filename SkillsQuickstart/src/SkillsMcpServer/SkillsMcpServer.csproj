@@ -24,14 +24,4 @@
     </None>
   </ItemGroup>
 
-  <!-- Copy skills folder to output directory -->
-  <ItemGroup>
-    <Content Include="..\SkillsQuickstart\skills\**\*" LinkBase="skills">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-  <ItemGroup>
-    <Content Remove="..\SkillsQuickstart\skills\ey-executive-deck\**" />
-  </ItemGroup>
-
 </Project>
