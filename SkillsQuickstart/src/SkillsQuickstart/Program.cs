@@ -2,16 +2,22 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using SkillsCore.Config;
+using SkillsCore.Models;
 using SkillsCore.Services;
+using SkillsQuickstart.Config;
+using SkillsQuickstart.Services;
+using Spectre.Console;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Skills Loader Quickstart
-// Demonstrates Anthropic's Agent Skills pattern with progressive disclosure
+// Skills Executor - .NET Orchestrator for Anthropic Skills
 // ═══════════════════════════════════════════════════════════════════════════
 
-Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-Console.WriteLine("║       Agent Skills Loader - Progressive Disclosure Demo      ║");
-Console.WriteLine("╚══════════════════════════════════════════════════════════════╝\n");
+AnsiConsole.Write(
+    new FigletText("Skills Executor")
+        .LeftJustified()
+        .Color(Color.Cyan1));
+
+AnsiConsole.MarkupLine("[dim].NET Orchestrator for Anthropic Skills Pattern[/]\n");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup: Configuration and Dependency Injection
@@ -20,156 +26,256 @@ Console.WriteLine("╚═══════════════════�
 var configuration = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false)
+    .AddUserSecrets<AzureOpenAIConfig>()
     .Build();
 
 var services = new ServiceCollection();
 
-// Bind configuration using IOptions pattern
 services.Configure<SkillsConfig>(configuration.GetSection(SkillsConfig.SectionName));
+services.Configure<AzureOpenAIConfig>(configuration.GetSection(AzureOpenAIConfig.SectionName));
+services.Configure<McpServersConfig>(configuration.GetSection(McpServersConfig.SectionName));
 
-// Register skill loader service
 services.AddSingleton<ISkillLoader, SkillLoaderService>();
+services.AddSingleton<IAzureOpenAIService, AzureOpenAIService>();
+services.AddSingleton<IMcpClientService, McpClientService>();
+services.AddSingleton<ISkillExecutor, SkillExecutor>();
 
 var serviceProvider = services.BuildServiceProvider();
+
 var skillLoader = serviceProvider.GetRequiredService<ISkillLoader>();
+var mcpClientService = serviceProvider.GetRequiredService<IMcpClientService>();
+var skillExecutor = serviceProvider.GetRequiredService<ISkillExecutor>();
 
-// Display configuration
-var config = serviceProvider.GetRequiredService<IOptions<SkillsConfig>>().Value;
-Console.WriteLine($"Skills Base Path: {Path.Combine(AppContext.BaseDirectory, config.BasePath)}");
-Console.WriteLine($"Skill File Name:  {config.SkillFileName}");
-Console.WriteLine($"Cache Duration:   {config.CacheDurationMinutes} minutes\n");
+var azureConfig = serviceProvider.GetRequiredService<IOptions<AzureOpenAIConfig>>().Value;
+var mcpConfig = serviceProvider.GetRequiredService<IOptions<McpServersConfig>>().Value;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LEVEL 1: Discovery (Metadata Only)
-// This is the lightest load - just names, descriptions, and resource counts
-// ═══════════════════════════════════════════════════════════════════════════
+// Show configuration
+var configTable = new Table()
+    .Border(TableBorder.Rounded)
+    .AddColumn("[bold]Setting[/]")
+    .AddColumn("[bold]Value[/]");
 
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine(" LEVEL 1: Discovery (Metadata Only)");
-Console.WriteLine(" Instructions are NOT loaded at this level.");
-Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+configTable.AddRow("Azure OpenAI Endpoint", string.IsNullOrEmpty(azureConfig.Endpoint) ? "[red]Not configured[/]" : $"[green]{azureConfig.Endpoint}[/]");
+configTable.AddRow("Model", azureConfig.DeploymentName);
+configTable.AddRow("MCP Servers", $"{mcpConfig.Servers.Count(s => s.Enabled)} configured");
 
-var skills = await skillLoader.DiscoverSkillsAsync();
+AnsiConsole.Write(new Panel(configTable).Header("[bold cyan]Configuration[/]").BorderColor(Color.Grey));
+AnsiConsole.WriteLine();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 1: Discover Available Skills
+// ─────────────────────────────────────────────────────────────────────────────
+
+IReadOnlyList<SkillDefinition> skills = null!;
+
+await AnsiConsole.Status()
+    .Spinner(Spinner.Known.Dots)
+    .StartAsync("[cyan]Discovering skills...[/]", async ctx =>
+    {
+        skills = await skillLoader.DiscoverSkillsAsync();
+    });
 
 if (skills.Count == 0)
 {
-    Console.WriteLine("No skills found. Ensure the 'skills' folder exists with SKILL.md files.\n");
-    Console.WriteLine("Expected structure:");
-    Console.WriteLine("  skills/");
-    Console.WriteLine("    └── your-skill/");
-    Console.WriteLine("        └── SKILL.md\n");
+    AnsiConsole.MarkupLine("[red]No skills found.[/] Ensure the 'skills' folder exists with SKILL.md files.");
     return;
 }
+
+// Show skills table
+var skillsTable = new Table()
+    .Border(TableBorder.Rounded)
+    .AddColumn("[bold]Skill[/]")
+    .AddColumn("[bold]Description[/]")
+    .AddColumn("[bold]Tags[/]");
 
 foreach (var skill in skills)
 {
-    Console.WriteLine($"┌─ {skill.Name} ({skill.Id})");
-    Console.WriteLine($"│  {skill.Description}");
-    Console.WriteLine($"│  Tags: [{string.Join(", ", skill.Tags)}]");
-    Console.WriteLine($"│  Resources: {skill.TotalResourceCount} files");
-    Console.WriteLine($"│  Instructions Loaded: {skill.Instructions != null}");
-    Console.WriteLine($"└─ Fully Loaded: {skill.IsFullyLoaded}\n");
+    skillsTable.AddRow(
+        $"[cyan]{skill.Name}[/]",
+        skill.Description.Length > 60 ? skill.Description[..60] + "..." : skill.Description,
+        $"[dim]{string.Join(", ", skill.Tags.Take(3))}[/]"
+    );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LEVEL 2: Full Skill Load (Instructions + Resource Inventory)
-// Now we load the markdown body (instructions) for the first available skill
-// ═══════════════════════════════════════════════════════════════════════════
+AnsiConsole.Write(new Panel(skillsTable).Header($"[bold green]Available Skills ({skills.Count})[/]").BorderColor(Color.Green));
+AnsiConsole.WriteLine();
 
-var firstSkill = skills.FirstOrDefault();
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 2: Connect to MCP Servers
+// ─────────────────────────────────────────────────────────────────────────────
 
-if (firstSkill == null)
+var toolCount = 0;
+try
 {
-    Console.WriteLine("No skills available to load.\n");
+    await AnsiConsole.Status()
+        .Spinner(Spinner.Known.Dots)
+        .StartAsync("[cyan]Connecting to MCP servers...[/]", async ctx =>
+        {
+            await mcpClientService.InitializeAsync();
+        });
+
+    var tools = mcpClientService.GetAvailableTools();
+    toolCount = tools.Count;
+
+    var toolsTable = new Table()
+        .Border(TableBorder.Simple)
+        .AddColumn("[bold]Tool[/]")
+        .AddColumn("[bold]Description[/]");
+
+    foreach (var tool in tools)
+    {
+        var desc = tool.FunctionDescription ?? "";
+        toolsTable.AddRow(
+            $"[yellow]{tool.FunctionName}[/]",
+            desc.Length > 50 ? desc[..50] + "..." : desc
+        );
+    }
+
+    AnsiConsole.Write(new Panel(toolsTable).Header($"[bold yellow]MCP Tools ({tools.Count})[/]").BorderColor(Color.Yellow));
+    AnsiConsole.WriteLine();
+}
+catch (Exception ex)
+{
+    AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not connect to MCP servers: {ex.Message}");
+    AnsiConsole.MarkupLine("[dim]Continuing without tool support...[/]\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 3: Select a Skill
+// ─────────────────────────────────────────────────────────────────────────────
+
+var selectedSkill = AnsiConsole.Prompt(
+    new SelectionPrompt<SkillDefinition>()
+        .Title("[bold]Select a skill to execute:[/]")
+        .PageSize(10)
+        .MoreChoicesText("[grey](Move up and down to reveal more skills)[/]")
+        .UseConverter(s => $"{s.Name} [dim]({s.Id})[/]")
+        .AddChoices(skills));
+
+// Load full skill
+SkillDefinition? loadedSkill = null;
+await AnsiConsole.Status()
+    .Spinner(Spinner.Known.Dots)
+    .StartAsync($"[cyan]Loading {selectedSkill.Name}...[/]", async ctx =>
+    {
+        loadedSkill = await skillLoader.LoadSkillAsync(selectedSkill.Id);
+    });
+
+if (loadedSkill == null)
+{
+    AnsiConsole.MarkupLine($"[red]Failed to load skill '{selectedSkill.Id}'.[/]");
     return;
 }
 
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine(" LEVEL 2: Full Skill Load");
-Console.WriteLine($" Loading '{firstSkill.Name}' with instructions.");
-Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+AnsiConsole.Write(new Rule($"[bold cyan]{loadedSkill.Name}[/]").LeftJustified());
+AnsiConsole.MarkupLine($"[dim]{loadedSkill.Description}[/]");
+AnsiConsole.MarkupLine($"Instructions: [green]{loadedSkill.Instructions?.Length ?? 0}[/] characters | Resources: [green]{loadedSkill.TotalResourceCount}[/] files\n");
 
-var loadedSkill = await skillLoader.LoadSkillAsync(firstSkill.Id);
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 4: Execute the Skill
+// ─────────────────────────────────────────────────────────────────────────────
 
-if (loadedSkill != null)
+if (string.IsNullOrEmpty(azureConfig.ApiKey) || string.IsNullOrEmpty(azureConfig.Endpoint))
 {
-    Console.WriteLine($"Loaded: {loadedSkill.Name}");
-    Console.WriteLine($"Version: {loadedSkill.Version ?? "not specified"}");
-    Console.WriteLine($"Is Fully Loaded: {loadedSkill.IsFullyLoaded}");
-    Console.WriteLine($"Instructions Length: {loadedSkill.Instructions?.Length ?? 0} characters\n");
-
-    // Show first 500 chars of instructions
-    if (loadedSkill.Instructions != null)
-    {
-        var preview = loadedSkill.Instructions.Length > 500
-            ? loadedSkill.Instructions[..500] + "..."
-            : loadedSkill.Instructions;
-        Console.WriteLine("Instructions Preview:");
-        Console.WriteLine("─────────────────────");
-        Console.WriteLine(preview);
-        Console.WriteLine("─────────────────────\n");
-    }
-
-    // List discovered resources
-    Console.WriteLine("Resource Inventory:");
-    foreach (var resource in loadedSkill.AllResources)
-    {
-        var loadedStatus = resource.IsLoaded ? "[LOADED]" : "[pending]";
-        Console.WriteLine($"  {resource.ResourceType,-10} {resource.RelativePath,-40} {loadedStatus}");
-    }
-    Console.WriteLine();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LEVEL 3: Resource Loading (On-Demand Content)
-// Load actual file content only when needed
-// ═══════════════════════════════════════════════════════════════════════════
-
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine(" LEVEL 3: Resource Loading (On-Demand)");
-Console.WriteLine(" Loading template content only when explicitly requested.");
-Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
-
-if (loadedSkill?.Templates.FirstOrDefault() is { } template)
-{
-    Console.WriteLine($"Loading: {template.RelativePath}");
-    Console.WriteLine($"File Size: {template.FileSize} bytes");
-    Console.WriteLine($"Was Loaded: {template.IsLoaded}\n");
-
-    var content = await skillLoader.LoadResourceContentAsync(template);
-
-    Console.WriteLine($"Now Loaded: {template.IsLoaded}");
-    Console.WriteLine($"Content Length: {content?.Length ?? 0} characters\n");
-
-    if (content != null)
-    {
-        var preview = content.Length > 500 ? content[..500] + "..." : content;
-        Console.WriteLine("Template Content:");
-        Console.WriteLine("─────────────────────");
-        Console.WriteLine(preview);
-        Console.WriteLine("─────────────────────\n");
-    }
+    AnsiConsole.Write(new Panel(
+        new Markup("[red]Azure OpenAI not configured.[/]\n\n" +
+                   "Set your credentials using User Secrets:\n" +
+                   "[dim]dotnet user-secrets set \"AzureOpenAI:Endpoint\" \"https://your-resource.openai.azure.com/\"[/]\n" +
+                   "[dim]dotnet user-secrets set \"AzureOpenAI:ApiKey\" \"your-api-key\"[/]"))
+        .Header("[bold red]Configuration Required[/]")
+        .BorderColor(Color.Red));
 }
 else
 {
-    Console.WriteLine($"No templates found for {firstSkill.Name} skill.\n");
+    var userInput = AnsiConsole.Prompt(
+        new TextPrompt<string>("[bold]Enter your request:[/]")
+            .PromptStyle("green"));
+
+    AnsiConsole.WriteLine();
+    AnsiConsole.Write(new Rule("[cyan]Execution Log[/]").LeftJustified());
+    AnsiConsole.WriteLine();
+
+    // Execute without spinner so we can see live progress
+    var result = await skillExecutor.ExecuteAsync(loadedSkill, userInput);
+
+    AnsiConsole.WriteLine();
+    AnsiConsole.Write(new Rule("[cyan]Results[/]").LeftJustified());
+
+    if (result != null)
+    {
+        // Results panel
+        var resultPanel = new Table()
+            .Border(TableBorder.None)
+            .HideHeaders()
+            .AddColumn("")
+            .AddColumn("");
+
+        resultPanel.AddRow("[bold]Status[/]", result.Success ? "[green]Success[/]" : "[red]Failed[/]");
+        resultPanel.AddRow("[bold]Turns[/]", result.TurnCount.ToString());
+        resultPanel.AddRow("[bold]Tool Calls[/]", result.ToolCalls.Count.ToString());
+
+        if (!string.IsNullOrEmpty(result.Error))
+        {
+            resultPanel.AddRow("[bold]Error[/]", $"[red]{result.Error}[/]");
+        }
+
+        AnsiConsole.Write(new Panel(resultPanel).Header("[bold]Execution Summary[/]").BorderColor(Color.Blue));
+
+        // Tool calls
+        if (result.ToolCalls.Count > 0)
+        {
+            var toolCallsTable = new Table()
+                .Border(TableBorder.Rounded)
+                .AddColumn("[bold]Tool[/]")
+                .AddColumn("[bold]Result Preview[/]");
+
+            foreach (var toolCall in result.ToolCalls)
+            {
+                toolCallsTable.AddRow(
+                    $"[yellow]{toolCall.ToolName}[/]",
+                    toolCall.Result.Length > 80 ? toolCall.Result[..80] + "..." : toolCall.Result
+                );
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(new Panel(toolCallsTable).Header("[bold yellow]Tool Calls Executed[/]").BorderColor(Color.Yellow));
+        }
+
+        // Response
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Panel(
+            new Markup(Markup.Escape(result.Response)))
+            .Header("[bold green]Response[/]")
+            .BorderColor(Color.Green)
+            .Expand());
+    }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Summary
-// ═══════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Architecture Summary
+// ─────────────────────────────────────────────────────────────────────────────
 
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine(" Summary: Progressive Disclosure Levels");
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine();
-Console.WriteLine(" Level 1 │ DiscoverSkillsAsync()      │ Metadata only (fast)");
-Console.WriteLine(" Level 2 │ LoadSkillAsync()           │ + Instructions loaded");
-Console.WriteLine(" Level 3 │ LoadResourceContentAsync() │ + Resource content loaded");
-Console.WriteLine();
-Console.WriteLine("This pattern minimizes memory usage and load times by");
-Console.WriteLine("deferring expensive operations until actually needed.");
-Console.WriteLine();
-Console.WriteLine("To execute skills with an AI model, use the SkillsMcpServer project");
-Console.WriteLine("which exposes skills as MCP tools, resources, and prompts.");
-Console.WriteLine();
+AnsiConsole.WriteLine();
+var tree = new Tree("[bold cyan]Architecture[/]")
+    .Style(Style.Parse("dim"));
+
+var orchestrator = tree.AddNode("[bold]Orchestrator[/]");
+orchestrator.AddNode("[cyan]Skill Loader[/] - Loads SKILL.md files as system prompts");
+orchestrator.AddNode("[cyan]Azure OpenAI[/] - LLM reasoning with function calling");
+orchestrator.AddNode("[cyan]MCP Client[/] - Routes tool calls to MCP servers");
+orchestrator.AddNode("[cyan]Skill Executor[/] - Orchestrates the conversation loop");
+
+var flow = tree.AddNode("[bold]Flow[/]");
+flow.AddNode("User Input → Skill Instructions → LLM → Tool Calls → MCP → Results → LLM → Output");
+
+AnsiConsole.Write(tree);
+
+AnsiConsole.WriteLine();
+AnsiConsole.MarkupLine("[dim]Press any key to exit...[/]");
+Console.ReadKey();
+
+// Cleanup
+if (mcpClientService is IAsyncDisposable disposable)
+{
+    await disposable.DisposeAsync();
+}

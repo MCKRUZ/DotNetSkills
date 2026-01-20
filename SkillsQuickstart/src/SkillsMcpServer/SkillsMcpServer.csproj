@@ -30,5 +30,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <Content Remove="..\SkillsQuickstart\skills\ey-executive-deck\**" />
+  </ItemGroup>
 
 </Project>

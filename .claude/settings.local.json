@@ -6,7 +6,9 @@
       "Bash(dotnet run:*)",
       "Bash(cd:*)",
       "Bash(tree:*)",
-      "Bash(dotnet add:*)"
+      "Bash(dotnet add:*)",
+      "Bash(cut:*)",
+      "Bash(gh repo view:*)"
     ]
   }
 }

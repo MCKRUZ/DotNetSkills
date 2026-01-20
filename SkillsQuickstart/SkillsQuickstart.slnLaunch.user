@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "New Profile",
+    "Projects": [
+      {
+        "Path": "src\\SkillsMcpServer\\SkillsMcpServer.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "src\\SkillsQuickstart\\SkillsQuickstart.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
