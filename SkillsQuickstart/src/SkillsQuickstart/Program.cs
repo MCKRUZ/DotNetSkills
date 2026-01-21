@@ -31,6 +31,8 @@ var configuration = new ConfigurationBuilder()
 
 var services = new ServiceCollection();
 
+services.AddSingleton<IConfiguration>(configuration);
+
 services.Configure<SkillsConfig>(configuration.GetSection(SkillsConfig.SectionName));
 services.Configure<AzureOpenAIConfig>(configuration.GetSection(AzureOpenAIConfig.SectionName));
 services.Configure<McpServersConfig>(configuration.GetSection(McpServersConfig.SectionName));
@@ -141,138 +143,125 @@ catch (Exception ex)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 3: Select a Skill
+// Main Loop: Select and Execute Skills
 // ─────────────────────────────────────────────────────────────────────────────
 
-var selectedSkill = AnsiConsole.Prompt(
-    new SelectionPrompt<SkillDefinition>()
-        .Title("[bold]Select a skill to execute:[/]")
-        .PageSize(10)
-        .MoreChoicesText("[grey](Move up and down to reveal more skills)[/]")
-        .UseConverter(s => $"{s.Name} [dim]({s.Id})[/]")
-        .AddChoices(skills));
-
-// Load full skill
-SkillDefinition? loadedSkill = null;
-await AnsiConsole.Status()
-    .Spinner(Spinner.Known.Dots)
-    .StartAsync($"[cyan]Loading {selectedSkill.Name}...[/]", async ctx =>
-    {
-        loadedSkill = await skillLoader.LoadSkillAsync(selectedSkill.Id);
-    });
-
-if (loadedSkill == null)
+var running = true;
+while (running)
 {
-    AnsiConsole.MarkupLine($"[red]Failed to load skill '{selectedSkill.Id}'.[/]");
-    return;
-}
+    // Step 3: Select a Skill
+    var selectedSkill = AnsiConsole.Prompt(
+        new SelectionPrompt<SkillDefinition>()
+            .Title("[bold]Select a skill to execute:[/]")
+            .PageSize(10)
+            .MoreChoicesText("[grey](Move up and down to reveal more skills)[/]")
+            .UseConverter(s => $"{s.Name} [dim]({s.Id})[/]")
+            .AddChoices(skills));
 
-AnsiConsole.Write(new Rule($"[bold cyan]{loadedSkill.Name}[/]").LeftJustified());
-AnsiConsole.MarkupLine($"[dim]{loadedSkill.Description}[/]");
-AnsiConsole.MarkupLine($"Instructions: [green]{loadedSkill.Instructions?.Length ?? 0}[/] characters | Resources: [green]{loadedSkill.TotalResourceCount}[/] files\n");
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 4: Execute the Skill
-// ─────────────────────────────────────────────────────────────────────────────
-
-if (string.IsNullOrEmpty(azureConfig.ApiKey) || string.IsNullOrEmpty(azureConfig.Endpoint))
-{
-    AnsiConsole.Write(new Panel(
-        new Markup("[red]Azure OpenAI not configured.[/]\n\n" +
-                   "Set your credentials using User Secrets:\n" +
-                   "[dim]dotnet user-secrets set \"AzureOpenAI:Endpoint\" \"https://your-resource.openai.azure.com/\"[/]\n" +
-                   "[dim]dotnet user-secrets set \"AzureOpenAI:ApiKey\" \"your-api-key\"[/]"))
-        .Header("[bold red]Configuration Required[/]")
-        .BorderColor(Color.Red));
-}
-else
-{
-    var userInput = AnsiConsole.Prompt(
-        new TextPrompt<string>("[bold]Enter your request:[/]")
-            .PromptStyle("green"));
-
-    AnsiConsole.WriteLine();
-    AnsiConsole.Write(new Rule("[cyan]Execution Log[/]").LeftJustified());
-    AnsiConsole.WriteLine();
-
-    // Execute without spinner so we can see live progress
-    var result = await skillExecutor.ExecuteAsync(loadedSkill, userInput);
-
-    AnsiConsole.WriteLine();
-    AnsiConsole.Write(new Rule("[cyan]Results[/]").LeftJustified());
-
-    if (result != null)
-    {
-        // Results panel
-        var resultPanel = new Table()
-            .Border(TableBorder.None)
-            .HideHeaders()
-            .AddColumn("")
-            .AddColumn("");
-
-        resultPanel.AddRow("[bold]Status[/]", result.Success ? "[green]Success[/]" : "[red]Failed[/]");
-        resultPanel.AddRow("[bold]Turns[/]", result.TurnCount.ToString());
-        resultPanel.AddRow("[bold]Tool Calls[/]", result.ToolCalls.Count.ToString());
-
-        if (!string.IsNullOrEmpty(result.Error))
+    // Load full skill
+    SkillDefinition? loadedSkill = null;
+    await AnsiConsole.Status()
+        .Spinner(Spinner.Known.Dots)
+        .StartAsync($"[cyan]Loading {selectedSkill.Name}...[/]", async ctx =>
         {
-            resultPanel.AddRow("[bold]Error[/]", $"[red]{result.Error}[/]");
-        }
+            loadedSkill = await skillLoader.LoadSkillAsync(selectedSkill.Id);
+        });
 
-        AnsiConsole.Write(new Panel(resultPanel).Header("[bold]Execution Summary[/]").BorderColor(Color.Blue));
+    if (loadedSkill == null)
+    {
+        AnsiConsole.MarkupLine($"[red]Failed to load skill '{selectedSkill.Id}'.[/]");
+        continue;
+    }
 
-        // Tool calls
-        if (result.ToolCalls.Count > 0)
+    AnsiConsole.Write(new Rule($"[bold cyan]{loadedSkill.Name}[/]").LeftJustified());
+    AnsiConsole.MarkupLine($"[dim]{loadedSkill.Description}[/]");
+    AnsiConsole.MarkupLine($"Instructions: [green]{loadedSkill.Instructions?.Length ?? 0}[/] characters | Resources: [green]{loadedSkill.TotalResourceCount}[/] files\n");
+
+    // Step 4: Execute the Skill
+    if (string.IsNullOrEmpty(azureConfig.ApiKey) || string.IsNullOrEmpty(azureConfig.Endpoint))
+    {
+        AnsiConsole.Write(new Panel(
+            new Markup("[red]Azure OpenAI not configured.[/]\n\n" +
+                       "Set your credentials using User Secrets:\n" +
+                       "[dim]dotnet user-secrets set \"AzureOpenAI:Endpoint\" \"https://your-resource.openai.azure.com/\"[/]\n" +
+                       "[dim]dotnet user-secrets set \"AzureOpenAI:ApiKey\" \"your-api-key\"[/]"))
+            .Header("[bold red]Configuration Required[/]")
+            .BorderColor(Color.Red));
+    }
+    else
+    {
+        var userInput = AnsiConsole.Prompt(
+            new TextPrompt<string>("[bold]Enter your request:[/]")
+                .PromptStyle("green"));
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[cyan]Execution Log[/]").LeftJustified());
+        AnsiConsole.WriteLine();
+
+        // Execute without spinner so we can see live progress
+        var result = await skillExecutor.ExecuteAsync(loadedSkill, userInput);
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[cyan]Results[/]").LeftJustified());
+
+        if (result != null)
         {
-            var toolCallsTable = new Table()
-                .Border(TableBorder.Rounded)
-                .AddColumn("[bold]Tool[/]")
-                .AddColumn("[bold]Result Preview[/]");
+            // Results panel
+            var resultPanel = new Table()
+                .Border(TableBorder.None)
+                .HideHeaders()
+                .AddColumn("")
+                .AddColumn("");
 
-            foreach (var toolCall in result.ToolCalls)
+            resultPanel.AddRow("[bold]Status[/]", result.Success ? "[green]Success[/]" : "[red]Failed[/]");
+            resultPanel.AddRow("[bold]Turns[/]", result.TurnCount.ToString());
+            resultPanel.AddRow("[bold]Tool Calls[/]", result.ToolCalls.Count.ToString());
+
+            if (!string.IsNullOrEmpty(result.Error))
             {
-                toolCallsTable.AddRow(
-                    $"[yellow]{toolCall.ToolName}[/]",
-                    toolCall.Result.Length > 80 ? toolCall.Result[..80] + "..." : toolCall.Result
-                );
+                resultPanel.AddRow("[bold]Error[/]", $"[red]{Markup.Escape(result.Error)}[/]");
             }
 
+            AnsiConsole.Write(new Panel(resultPanel).Header("[bold]Execution Summary[/]").BorderColor(Color.Blue));
+
+            // Tool calls
+            if (result.ToolCalls.Count > 0)
+            {
+                var toolCallsTable = new Table()
+                    .Border(TableBorder.Rounded)
+                    .AddColumn("[bold]Tool[/]")
+                    .AddColumn("[bold]Result Preview[/]");
+
+                foreach (var toolCall in result.ToolCalls)
+                {
+                    var resultPreview = toolCall.Result.Length > 80
+                        ? toolCall.Result[..80] + "..."
+                        : toolCall.Result;
+                    toolCallsTable.AddRow(
+                        $"[yellow]{Markup.Escape(toolCall.ToolName)}[/]",
+                        Markup.Escape(resultPreview)
+                    );
+                }
+
+                AnsiConsole.WriteLine();
+                AnsiConsole.Write(new Panel(toolCallsTable).Header("[bold yellow]Tool Calls Executed[/]").BorderColor(Color.Yellow));
+            }
+
+            // Response
             AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Panel(toolCallsTable).Header("[bold yellow]Tool Calls Executed[/]").BorderColor(Color.Yellow));
+            AnsiConsole.Write(new Panel(
+                new Markup(Markup.Escape(result.Response)))
+                .Header("[bold green]Response[/]")
+                .BorderColor(Color.Green)
+                .Expand());
         }
-
-        // Response
-        AnsiConsole.WriteLine();
-        AnsiConsole.Write(new Panel(
-            new Markup(Markup.Escape(result.Response)))
-            .Header("[bold green]Response[/]")
-            .BorderColor(Color.Green)
-            .Expand());
     }
+
+    // Ask if user wants to continue
+    AnsiConsole.WriteLine();
+    running = AnsiConsole.Confirm("[bold]Run another skill?[/]", defaultValue: true);
+    AnsiConsole.WriteLine();
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Architecture Summary
-// ─────────────────────────────────────────────────────────────────────────────
-
-AnsiConsole.WriteLine();
-var tree = new Tree("[bold cyan]Architecture[/]")
-    .Style(Style.Parse("dim"));
-
-var orchestrator = tree.AddNode("[bold]Orchestrator[/]");
-orchestrator.AddNode("[cyan]Skill Loader[/] - Loads SKILL.md files as system prompts");
-orchestrator.AddNode("[cyan]Azure OpenAI[/] - LLM reasoning with function calling");
-orchestrator.AddNode("[cyan]MCP Client[/] - Routes tool calls to MCP servers");
-orchestrator.AddNode("[cyan]Skill Executor[/] - Orchestrates the conversation loop");
-
-var flow = tree.AddNode("[bold]Flow[/]");
-flow.AddNode("User Input → Skill Instructions → LLM → Tool Calls → MCP → Results → LLM → Output");
-
-AnsiConsole.Write(tree);
-
-AnsiConsole.WriteLine();
-AnsiConsole.MarkupLine("[dim]Press any key to exit...[/]");
-Console.ReadKey();
 
 // Cleanup
 if (mcpClientService is IAsyncDisposable disposable)

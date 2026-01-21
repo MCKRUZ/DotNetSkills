@@ -213,8 +213,14 @@ public class McpClientService : IMcpClientService
     /// </summary>
     private static string ResolvePathIfRelative(string argument)
     {
-        // Check if this looks like a file path (contains path separators or file extension)
-        if ((argument.Contains('/') || argument.Contains('\\') || argument.EndsWith(".dll"))
+        // Skip npm package names (e.g., @modelcontextprotocol/server-github)
+        if (argument.StartsWith('@') || argument.StartsWith("-"))
+        {
+            return argument;
+        }
+
+        // Check if this looks like a file path (ends with common extensions or contains ..)
+        if ((argument.EndsWith(".dll") || argument.EndsWith(".exe") || argument.Contains(".."))
             && !Path.IsPathRooted(argument))
         {
             return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, argument));
