@@ -50,11 +50,16 @@ public class McpClientService : IMcpClientService
                     }
                 };
 
+                // Resolve relative paths in arguments against the app's base directory
+                var resolvedArguments = serverConfig.Arguments
+                    .Select(arg => ResolvePathIfRelative(arg))
+                    .ToList();
+
                 // Build the stdio transport configuration
                 var transportConfig = new StdioClientTransportOptions
                 {
                     Command = serverConfig.Command,
-                    Arguments = serverConfig.Arguments,
+                    Arguments = resolvedArguments,
                     Name = serverConfig.Name
                 };
 
@@ -201,5 +206,19 @@ public class McpClientService : IMcpClientService
         }
         _clients.Clear();
         _toolRegistry.Clear();
+    }
+
+    /// <summary>
+    /// Resolves a path argument if it's relative, using the app's base directory.
+    /// </summary>
+    private static string ResolvePathIfRelative(string argument)
+    {
+        // Check if this looks like a file path (contains path separators or file extension)
+        if ((argument.Contains('/') || argument.Contains('\\') || argument.EndsWith(".dll"))
+            && !Path.IsPathRooted(argument))
+        {
+            return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, argument));
+        }
+        return argument;
     }
 }
