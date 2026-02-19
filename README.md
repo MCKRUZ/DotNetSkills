@@ -122,7 +122,7 @@ dotnet user-secrets set "AzureOpenAI:Endpoint" "https://your-resource.openai.azu
 dotnet user-secrets set "AzureOpenAI:ApiKey" "your-api-key"
 
 # GitHub Personal Access Token (for github-assistant skill)
-dotnet user-secrets set "GITHUB_PERSONAL_ACCESS_TOKEN" "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"
+dotnet user-secrets set "GITHUB_PERSONAL_ACCESS_TOKEN" "your-githbu-access-token"
 ```
 
 ### 2. Configure MCP Servers
