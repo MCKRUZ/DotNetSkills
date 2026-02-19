@@ -38,9 +38,9 @@ public class McpClientService : IMcpClientService
         {
             try
             {
-                Console.WriteLine($"  Connecting to MCP server: {serverConfig.Name}...");
+                Console.WriteLine($"  Connecting to MCP server: {serverConfig.Name} ({serverConfig.Type})...");
 
-                // Create client options for stdio transport
+                // Create client options
                 var clientOptions = new McpClientOptions
                 {
                     ClientInfo = new Implementation
@@ -50,43 +50,18 @@ public class McpClientService : IMcpClientService
                     }
                 };
 
-                // Resolve relative paths in arguments against the app's base directory
-                var resolvedArguments = serverConfig.Arguments
-                    .Select(arg => ResolvePathIfRelative(arg))
-                    .ToList();
+                McpClient client;
 
-                // Build the stdio transport configuration
-                var transportConfig = new StdioClientTransportOptions
+                if (serverConfig.Type == McpTransportType.Http)
                 {
-                    Command = serverConfig.Command,
-                    Arguments = resolvedArguments,
-                    Name = serverConfig.Name
-                };
-
-                // Add environment variables if specified
-                if (serverConfig.Environment.Count > 0)
-                {
-                    var envVars = new Dictionary<string, string?>();
-                    foreach (var kvp in serverConfig.Environment)
-                    {
-                        var value = kvp.Value;
-
-                        // If the value is empty, try to get it from configuration (user secrets)
-                        if (string.IsNullOrEmpty(value))
-                        {
-                            // Try root-level key first (e.g., "GITHUB_PERSONAL_ACCESS_TOKEN")
-                            value = _configuration[kvp.Key];
-                        }
-
-                        envVars[kvp.Key] = value;
-                    }
-                    transportConfig.EnvironmentVariables = envVars;
+                    // HTTP transport - connect to remote endpoint
+                    client = await CreateHttpClientAsync(serverConfig, clientOptions);
                 }
-
-                // Create and connect the client
-                var client = await McpClient.CreateAsync(
-                    new StdioClientTransport(transportConfig),
-                    clientOptions);
+                else
+                {
+                    // Stdio transport - spawn a process
+                    client = await CreateStdioClientAsync(serverConfig, clientOptions);
+                }
 
                 _clients[serverConfig.Name] = client;
 
@@ -206,6 +181,67 @@ public class McpClientService : IMcpClientService
         }
         _clients.Clear();
         _toolRegistry.Clear();
+    }
+
+    /// <summary>
+    /// Creates an MCP client using HTTP transport.
+    /// </summary>
+    private async Task<McpClient> CreateHttpClientAsync(McpServerEntry serverConfig, McpClientOptions clientOptions)
+    {
+        if (string.IsNullOrEmpty(serverConfig.Endpoint))
+        {
+            throw new InvalidOperationException($"HTTP MCP server '{serverConfig.Name}' requires an Endpoint.");
+        }
+
+        var httpTransportOptions = new HttpClientTransportOptions
+        {
+            Name = serverConfig.Name,
+            Endpoint = new Uri(serverConfig.Endpoint)
+        };
+
+        var transport = new HttpClientTransport(httpTransportOptions);
+        return await McpClient.CreateAsync(transport, clientOptions);
+    }
+
+    /// <summary>
+    /// Creates an MCP client using Stdio transport.
+    /// </summary>
+    private async Task<McpClient> CreateStdioClientAsync(McpServerEntry serverConfig, McpClientOptions clientOptions)
+    {
+        // Resolve relative paths in arguments against the app's base directory
+        var resolvedArguments = serverConfig.Arguments
+            .Select(arg => ResolvePathIfRelative(arg))
+            .ToList();
+
+        // Build the stdio transport configuration
+        var transportConfig = new StdioClientTransportOptions
+        {
+            Command = serverConfig.Command,
+            Arguments = resolvedArguments,
+            Name = serverConfig.Name
+        };
+
+        // Add environment variables if specified
+        if (serverConfig.Environment.Count > 0)
+        {
+            var envVars = new Dictionary<string, string?>();
+            foreach (var kvp in serverConfig.Environment)
+            {
+                var value = kvp.Value;
+
+                // If the value is empty, try to get it from configuration (user secrets)
+                if (string.IsNullOrEmpty(value))
+                {
+                    // Try root-level key first (e.g., "GITHUB_PERSONAL_ACCESS_TOKEN")
+                    value = _configuration[kvp.Key];
+                }
+
+                envVars[kvp.Key] = value;
+            }
+            transportConfig.EnvironmentVariables = envVars;
+        }
+
+        return await McpClient.CreateAsync(new StdioClientTransport(transportConfig), clientOptions);
     }
 
     /// <summary>

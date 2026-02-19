@@ -7,6 +7,7 @@ using SkillsCore.Services;
 using SkillsQuickstart.Config;
 using SkillsQuickstart.Services;
 using Spectre.Console;
+using RunConfig = SkillsQuickstart.Config.RunConfig;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Skills Executor - .NET Orchestrator for Anthropic Skills
@@ -34,11 +35,25 @@ var services = new ServiceCollection();
 services.AddSingleton<IConfiguration>(configuration);
 
 services.Configure<SkillsConfig>(configuration.GetSection(SkillsConfig.SectionName));
+services.Configure<LlmProviderConfig>(configuration.GetSection(LlmProviderConfig.SectionName));
 services.Configure<AzureOpenAIConfig>(configuration.GetSection(AzureOpenAIConfig.SectionName));
+services.Configure<OpenAIConfig>(configuration.GetSection(OpenAIConfig.SectionName));
 services.Configure<McpServersConfig>(configuration.GetSection(McpServersConfig.SectionName));
+services.Configure<RunConfig>(configuration.GetSection(RunConfig.SectionName));
 
 services.AddSingleton<ISkillLoader, SkillLoaderService>();
-services.AddSingleton<IAzureOpenAIService, AzureOpenAIService>();
+
+// Register LLM service based on configuration
+var llmProvider = configuration.GetSection(LlmProviderConfig.SectionName).Get<LlmProviderConfig>()?.Provider.ToLower() ?? "azure";
+if (llmProvider == "openai")
+{
+    services.AddSingleton<IAzureOpenAIService, OpenAIService>();
+}
+else
+{
+    services.AddSingleton<IAzureOpenAIService, AzureOpenAIService>();
+}
+
 services.AddSingleton<IMcpClientService, McpClientService>();
 services.AddSingleton<ISkillExecutor, SkillExecutor>();
 
@@ -48,8 +63,16 @@ var skillLoader = serviceProvider.GetRequiredService<ISkillLoader>();
 var mcpClientService = serviceProvider.GetRequiredService<IMcpClientService>();
 var skillExecutor = serviceProvider.GetRequiredService<ISkillExecutor>();
 
+var llmProviderConfig = serviceProvider.GetRequiredService<IOptions<LlmProviderConfig>>().Value;
 var azureConfig = serviceProvider.GetRequiredService<IOptions<AzureOpenAIConfig>>().Value;
+var openAIConfig = serviceProvider.GetRequiredService<IOptions<OpenAIConfig>>().Value;
 var mcpConfig = serviceProvider.GetRequiredService<IOptions<McpServersConfig>>().Value;
+var runConfig = serviceProvider.GetRequiredService<IOptions<RunConfig>>().Value;
+
+if (runConfig.IsHeadless)
+{
+    AnsiConsole.MarkupLine($"[dim]Headless mode: skill=[cyan]{runConfig.SkillId}[/][/]\n");
+}
 
 // Show configuration
 var configTable = new Table()
@@ -57,8 +80,18 @@ var configTable = new Table()
     .AddColumn("[bold]Setting[/]")
     .AddColumn("[bold]Value[/]");
 
-configTable.AddRow("Azure OpenAI Endpoint", string.IsNullOrEmpty(azureConfig.Endpoint) ? "[red]Not configured[/]" : $"[green]{azureConfig.Endpoint}[/]");
-configTable.AddRow("Model", azureConfig.DeploymentName);
+configTable.AddRow("LLM Provider", $"[bold cyan]{llmProviderConfig.Provider.ToUpper()}[/]");
+
+if (llmProviderConfig.Provider.ToLower() == "openai")
+{
+    configTable.AddRow("OpenAI Model", string.IsNullOrEmpty(openAIConfig.ApiKey) ? "[red]Not configured[/]" : $"[green]{openAIConfig.Model}[/]");
+}
+else
+{
+    configTable.AddRow("Azure OpenAI Endpoint", string.IsNullOrEmpty(azureConfig.Endpoint) ? "[red]Not configured[/]" : $"[green]{azureConfig.Endpoint}[/]");
+    configTable.AddRow("Model", azureConfig.DeploymentName);
+}
+
 configTable.AddRow("MCP Servers", $"{mcpConfig.Servers.Count(s => s.Enabled)} configured");
 
 AnsiConsole.Write(new Panel(configTable).Header("[bold cyan]Configuration[/]").BorderColor(Color.Grey));
@@ -150,13 +183,23 @@ var running = true;
 while (running)
 {
     // Step 3: Select a Skill
-    var selectedSkill = AnsiConsole.Prompt(
-        new SelectionPrompt<SkillDefinition>()
-            .Title("[bold]Select a skill to execute:[/]")
-            .PageSize(10)
-            .MoreChoicesText("[grey](Move up and down to reveal more skills)[/]")
-            .UseConverter(s => $"{s.Name} [dim]({s.Id})[/]")
-            .AddChoices(skills));
+    SkillDefinition selectedSkill;
+    if (!string.IsNullOrWhiteSpace(runConfig.SkillId))
+    {
+        selectedSkill = skills.FirstOrDefault(s => s.Id == runConfig.SkillId)
+            ?? throw new InvalidOperationException($"Skill '{runConfig.SkillId}' not found.");
+        AnsiConsole.MarkupLine($"[bold]Selected skill:[/] [cyan]{selectedSkill.Name}[/] [dim](from RunConfig)[/]");
+    }
+    else
+    {
+        selectedSkill = AnsiConsole.Prompt(
+            new SelectionPrompt<SkillDefinition>()
+                .Title("[bold]Select a skill to execute:[/]")
+                .PageSize(10)
+                .MoreChoicesText("[grey](Move up and down to reveal more skills)[/]")
+                .UseConverter(s => $"{s.Name} [dim]({s.Id})[/]")
+                .AddChoices(skills));
+    }
 
     // Load full skill
     SkillDefinition? loadedSkill = null;
@@ -190,9 +233,14 @@ while (running)
     }
     else
     {
-        var userInput = AnsiConsole.Prompt(
-            new TextPrompt<string>("[bold]Enter your request:[/]")
-                .PromptStyle("green"));
+        var userInput = !string.IsNullOrWhiteSpace(runConfig.UserInput)
+            ? runConfig.UserInput
+            : AnsiConsole.Prompt(
+                new TextPrompt<string>("[bold]Enter your request:[/]")
+                    .PromptStyle("green"));
+
+        if (!string.IsNullOrWhiteSpace(runConfig.UserInput))
+            AnsiConsole.MarkupLine($"[bold]Request:[/] [green]{Markup.Escape(userInput)}[/] [dim](from RunConfig)[/]");
 
         AnsiConsole.WriteLine();
         AnsiConsole.Write(new Rule("[cyan]Execution Log[/]").LeftJustified());
@@ -259,8 +307,15 @@ while (running)
 
     // Ask if user wants to continue
     AnsiConsole.WriteLine();
-    running = AnsiConsole.Confirm("[bold]Run another skill?[/]", defaultValue: true);
-    AnsiConsole.WriteLine();
+    if (runConfig.ShouldRunOnce)
+    {
+        running = false;
+    }
+    else
+    {
+        running = AnsiConsole.Confirm("[bold]Run another skill?[/]", defaultValue: true);
+        AnsiConsole.WriteLine();
+    }
 }
 
 // Cleanup

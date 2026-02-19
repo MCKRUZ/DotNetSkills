@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run SkillsQuickstart",
+			"type": "shell",
+			"command": "dotnet run --project src/SkillsQuickstart/SkillsQuickstart.csproj",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		}
+	]
+}
